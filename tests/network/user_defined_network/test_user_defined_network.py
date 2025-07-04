@@ -5,7 +5,7 @@ from ocp_resources.user_defined_network import Layer2UserDefinedNetwork
 from ocp_resources.utils.constants import TIMEOUT_1MINUTE
 
 from libs.net.traffic_generator import Client, Server, is_tcp_connection
-from libs.net.udn import udn_primary_network
+from libs.net.udn import udn_primary_network, udn_primary_network_passt
 from libs.net.vmspec import lookup_iface_status, lookup_primary_network
 from libs.vm import affinity
 from libs.vm.affinity import new_pod_anti_affinity
@@ -21,6 +21,21 @@ SERVER_PORT = 5201
 def udn_vm(namespace_name, name, template_labels=None):
     spec = base_vmspec()
     iface, network = udn_primary_network(name="udn-primary")
+    spec.template.spec.domain.devices.interfaces = [iface]
+    spec.template.spec.networks = [network]
+    if template_labels:
+        spec.template.metadata.labels = spec.template.metadata.labels or {}
+        spec.template.metadata.labels.update(template_labels)
+        # Use the first label key and first value as the anti-affinity label to use:
+        label, *_ = template_labels.items()
+        spec.template.spec.affinity = new_pod_anti_affinity(label=label)
+
+    return fedora_vm(namespace=namespace_name, name=name, spec=spec)
+
+
+def udn_passt_vm(namespace_name, name, template_labels=None):
+    spec = base_vmspec()
+    iface, network = udn_primary_network_passt(name="udn-primary")
     spec.template.spec.domain.devices.interfaces = [iface]
     spec.template.spec.networks = [network]
     if template_labels:
@@ -73,6 +88,22 @@ def vma_udn(udn_namespace, namespaced_layer2_user_defined_network, udn_affinity_
 @pytest.fixture(scope="class")
 def vmb_udn_non_migratable(udn_namespace, namespaced_layer2_user_defined_network, udn_affinity_label):
     with udn_vm(namespace_name=udn_namespace.name, name="vmb-udn", template_labels=dict((udn_affinity_label,))) as vm:
+        vm.start(wait=True)
+        vm.wait_for_agent_connected()
+        yield vm
+
+
+@pytest.fixture(scope="class")
+def vma_udn_passt(udn_namespace, namespaced_layer2_user_defined_network, udn_affinity_label):
+    with udn_passt_vm(namespace_name=udn_namespace.name, name="vma-udn", template_labels=dict((udn_affinity_label,))) as vm:
+        vm.start(wait=True)
+        vm.wait_for_agent_connected()
+        yield vm
+
+
+@pytest.fixture(scope="class")
+def vmb_udn_passt_non_migratable(udn_namespace, namespaced_layer2_user_defined_network, udn_affinity_label):
+    with udn_passt_vm(namespace_name=udn_namespace.name, name="vmb-udn", template_labels=dict((udn_affinity_label,))) as vm:
         vm.start(wait=True)
         vm.wait_for_agent_connected()
         yield vm
